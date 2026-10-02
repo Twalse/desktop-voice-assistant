@@ -1,0 +1,10 @@
+rapidfuzz
+pyautogui
+pygetwindow
+pycaw
+comtypes
+customtkinter
+google-genai
+requests
+vosk
+sounddevice
