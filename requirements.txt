@@ -6,3 +6,4 @@ comtypes
 faster-whisper
 sounddevice
 numpy
+customtkinter
