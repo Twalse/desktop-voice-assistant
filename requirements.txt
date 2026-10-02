@@ -3,9 +3,8 @@ pyautogui
 pygetwindow
 pycaw
 comtypes
-faster-whisper
-sounddevice
-numpy
 customtkinter
 google-genai
 requests
+SpeechRecognition
+PyAudio

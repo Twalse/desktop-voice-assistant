@@ -3,39 +3,52 @@
 import unittest
 from unittest.mock import MagicMock, patch
 
-import numpy as np
-
 from audio.listener import AudioListener
 from core.router import CommandRouter, RouterMode
 
 
 class TestAudioListener(unittest.TestCase):
     def test_init_and_attributes(self):
-        listener = AudioListener(model_size="small", device="cpu", sample_rate=16000)
-        self.assertEqual(listener.model_size, "small")
-        self.assertEqual(listener.device, "cpu")
-        self.assertEqual(listener.sample_rate, 16000)
+        listener = AudioListener(language="ru-RU")
+        self.assertEqual(listener.language, "ru-RU")
         self.assertFalse(listener._is_listening)
 
-    @patch("audio.listener.AudioListener._init_whisper_model")
-    def test_transcribe_audio_empty_when_no_model(self, mock_init):
-        listener = AudioListener()
-        listener.whisper_model = None
-        audio_data = np.zeros(16000, dtype=np.float32)
-        res = listener.transcribe_audio(audio_data)
-        self.assertEqual(res, "")
+    def test_audio_callback_success(self):
+        mock_speech_detected = MagicMock()
+        mock_transcription_ready = MagicMock()
 
-    def test_transcribe_audio_with_mock_model(self):
-        listener = AudioListener()
-        mock_seg = MagicMock()
-        mock_seg.text = "Hello world"
-        mock_whisper = MagicMock()
-        mock_whisper.transcribe.return_value = ([mock_seg], None)
-        listener.whisper_model = mock_whisper
+        listener = AudioListener(
+            language="ru-RU",
+            on_speech_detected=mock_speech_detected,
+            on_transcription_ready=mock_transcription_ready,
+        )
 
-        audio_data = np.zeros(16000, dtype=np.float32)
-        res = listener.transcribe_audio(audio_data)
-        self.assertEqual(res, "Hello world")
+        mock_recognizer = MagicMock()
+        mock_recognizer.recognize_google.return_value = "открой браузер"
+        mock_audio = MagicMock()
+
+        listener._audio_callback(mock_recognizer, mock_audio)
+
+        mock_speech_detected.assert_called_once()
+        mock_recognizer.recognize_google.assert_called_once_with(mock_audio, language="ru-RU")
+        mock_transcription_ready.assert_called_once_with("открой браузер")
+
+    def test_audio_callback_unknown_value_error(self):
+        mock_transcription_ready = MagicMock()
+        listener = AudioListener(on_transcription_ready=mock_transcription_ready)
+
+        mock_recognizer = MagicMock()
+
+        try:
+            import speech_recognition as sr
+            mock_recognizer.recognize_google.side_effect = sr.UnknownValueError()
+        except ImportError:
+            mock_recognizer.recognize_google.side_effect = Exception("UnknownValue")
+
+        mock_audio = MagicMock()
+        listener._audio_callback(mock_recognizer, mock_audio)
+
+        mock_transcription_ready.assert_not_called()
 
 
 class TestCommandRouter(unittest.TestCase):

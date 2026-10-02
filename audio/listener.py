@@ -1,171 +1,97 @@
-"""Audio Listener module for asynchronous microphone listening and offline STT transcription.
+"""Audio Listener module using SpeechRecognition for lightweight speech transcription.
 
-This module listens to the microphone in a background thread, detects voice activity,
-records audio chunks when speech is detected, and transcribes them using faster-whisper.
+Listens in background using SpeechRecognition and recognize_google.
+Provides callbacks on_speech_detected() and on_transcription_ready(text).
 """
 
-import threading
-import time
 from typing import Callable, Optional
 
-import numpy as np
+try:
+    import speech_recognition as sr  # type: ignore
+except ImportError:
+    sr = None
 
 
 class AudioListener:
-    """Asynchronous audio listener using sounddevice and faster-whisper STT."""
+    """Asynchronous audio listener using SpeechRecognition."""
 
     def __init__(
         self,
-        model_size: str = "base",
-        device: str = "cuda",
-        sample_rate: int = 16000,
-        silence_threshold: float = 0.015,
-        silence_duration: float = 1.0,
+        language: str = "ru-RU",
         on_speech_detected: Optional[Callable[[], None]] = None,
         on_transcription_ready: Optional[Callable[[str], None]] = None,
+        **kwargs,
     ) -> None:
         """Initialize AudioListener.
 
         Args:
-            model_size: faster-whisper model size ('base', 'small', etc.).
-            device: Computing device ('cuda' or 'cpu'). Falls back to 'cpu' if cuda fails.
-            sample_rate: Sampling rate in Hz. Defaults to 16000.
-            silence_threshold: RMS amplitude threshold for speech detection.
-            silence_duration: Seconds of silence required to trigger end of speech.
-            on_speech_detected: Optional callback when voice activity starts.
+            language: Speech recognition language code (e.g., 'ru-RU').
+            on_speech_detected: Optional callback when speech activity is detected.
             on_transcription_ready: Optional callback receiving transcribed text.
         """
-        self.model_size = model_size
-        self.device = device
-        self.sample_rate = sample_rate
-        self.silence_threshold = silence_threshold
-        self.silence_duration = silence_duration
-
+        self.language = language
         self.on_speech_detected = on_speech_detected
         self.on_transcription_ready = on_transcription_ready
 
-        self.whisper_model = None
+        self.recognizer: Optional[sr.Recognizer] = None
+        self.microphone: Optional[sr.Microphone] = None
+        self.stop_listening_fn: Optional[Callable[[bool], None]] = None
         self._is_listening = False
-        self._listen_thread: Optional[threading.Thread] = None
 
-    def _init_whisper_model(self) -> None:
-        """Lazy load faster-whisper model with CUDA -> CPU fallback."""
-        if self.whisper_model is not None:
-            return
-
-        try:
-            from faster_whisper import WhisperModel  # type: ignore
-
+        if sr:
             try:
-                self.whisper_model = WhisperModel(self.model_size, device=self.device, compute_type="float16")
+                self.recognizer = sr.Recognizer()
             except Exception:
-                # Fallback to CPU
-                self.whisper_model = WhisperModel(self.model_size, device="cpu", compute_type="int8")
-        except Exception:
-            # Model loading failure or faster-whisper missing
-            self.whisper_model = None
+                self.recognizer = None
 
     def start_listening(self) -> None:
-        """Start listening to microphone input asynchronously in a separate thread."""
-        if self._is_listening:
+        """Start listening to microphone input asynchronously in the background."""
+        if self._is_listening or sr is None or self.recognizer is None:
             return
 
-        self._is_listening = True
-        self._listen_thread = threading.Thread(target=self._listen_loop, daemon=True)
-        self._listen_thread.start()
-
-    def stop_listening(self) -> None:
-        """Stop microphone listening loop."""
-        self._is_listening = False
-        if self._listen_thread and self._listen_thread.is_alive():
-            self._listen_thread.join(timeout=2.0)
-
-    def _listen_loop(self) -> None:
-        """Background thread loop for capturing audio and performing VAD & transcription."""
-        self._init_whisper_model()
-
         try:
-            import sounddevice as sd  # type: ignore
-        except Exception:
-            return
+            self.microphone = sr.Microphone()
+            with self.microphone as source:
+                self.recognizer.adjust_for_ambient_noise(source, duration=0.5)
 
-        chunk_duration = 0.1  # 100ms chunks
-        chunk_samples = int(self.sample_rate * chunk_duration)
-
-        is_speaking = False
-        audio_buffer = []
-        silence_chunks_count = 0
-        max_silence_chunks = int(self.silence_duration / chunk_duration)
-
-        try:
-            with sd.InputStream(
-                samplerate=self.sample_rate,
-                channels=1,
-                dtype="float32",
-                blocksize=chunk_samples,
-            ) as stream:
-                while self._is_listening:
-                    data, _ = stream.read(chunk_samples)
-                    if data is None or len(data) == 0:
-                        continue
-
-                    # Calculate RMS energy for VAD
-                    rms = np.sqrt(np.mean(data**2))
-
-                    if rms >= self.silence_threshold:
-                        if not is_speaking:
-                            is_speaking = True
-                            if self.on_speech_detected:
-                                try:
-                                    self.on_speech_detected()
-                                except Exception:
-                                    pass
-                        audio_buffer.append(data.flatten())
-                        silence_chunks_count = 0
-                    else:
-                        if is_speaking:
-                            audio_buffer.append(data.flatten())
-                            silence_chunks_count += 1
-                            if silence_chunks_count >= max_silence_chunks:
-                                # End of speech detected -> transcribe buffer
-                                is_speaking = False
-                                complete_audio = np.concatenate(audio_buffer, axis=0)
-                                audio_buffer.clear()
-                                silence_chunks_count = 0
-
-                                self._transcribe_and_callback(complete_audio)
-
+            self.stop_listening_fn = self.recognizer.listen_in_background(
+                self.microphone,
+                self._audio_callback,
+            )
+            self._is_listening = True
         except Exception:
             self._is_listening = False
 
-    def _transcribe_and_callback(self, audio_data: np.ndarray) -> None:
-        """Transcribe float32 audio array using faster-whisper and call callback."""
-        if not self.on_transcription_ready:
-            return
-
-        text = self.transcribe_audio(audio_data)
-        if text and text.strip():
+    def stop_listening(self) -> None:
+        """Stop microphone listening loop."""
+        if self.stop_listening_fn:
             try:
-                self.on_transcription_ready(text.strip())
+                self.stop_listening_fn(wait_for_stop=False)
+            except Exception:
+                pass
+            self.stop_listening_fn = None
+        self._is_listening = False
+
+    def _audio_callback(self, recognizer: sr.Recognizer, audio: sr.AudioData) -> None:
+        """Background callback called when audio frame is captured."""
+        if self.on_speech_detected:
+            try:
+                self.on_speech_detected()
             except Exception:
                 pass
 
-    def transcribe_audio(self, audio_data: np.ndarray) -> str:
-        """Transcribe audio numpy array to text.
-
-        Args:
-            audio_data: 1D float32 numpy array sampled at sample_rate.
-
-        Returns:
-            Transcribed text string or empty string on error.
-        """
-        self._init_whisper_model()
-        if self.whisper_model is None:
-            return ""
-
         try:
-            segments, _ = self.whisper_model.transcribe(audio_data, beam_size=5)
-            transcription = " ".join([seg.text for seg in segments]).strip()
-            return transcription
+            text = recognizer.recognize_google(audio, language=self.language)
+            if text and text.strip() and self.on_transcription_ready:
+                try:
+                    self.on_transcription_ready(text.strip())
+                except Exception:
+                    pass
+        except sr.UnknownValueError:
+            # Speech was unintelligible / background noise
+            pass
+        except sr.RequestError:
+            # API unreached or request failed
+            pass
         except Exception:
-            return ""
+            pass
