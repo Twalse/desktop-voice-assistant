@@ -1,0 +1,5 @@
+rapidfuzz
+pyautogui
+pygetwindow
+pycaw
+comtypes
