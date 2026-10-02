@@ -1,17 +1,35 @@
 """Command Router module for multi-language voice command dispatching.
 
-Supports Russian and English phrases, pattern extraction, fuzzy matching,
+Supports Russian and English phrases, phonetic normalization, pattern extraction, fuzzy matching,
 and two operation modes: Strict/Scripted mode and Dialogue/LLM mode.
 """
 
 import re
 from enum import Enum
-from typing import Callable, Optional, Tuple
+from typing import Callable, Dict, Optional, Tuple
 
 from rapidfuzz import fuzz
 
 from core import system_actions
 from core.app_finder import AppFinder, launch_app
+
+# --- Phonetic Replacement & Alias Dictionary ---
+# Add common Speech-to-Text misrecognitions here.
+# Longer phrases should come before shorter substrings for accurate replacement.
+PHONETIC_REPLACEMENTS: Dict[str, str] = {
+    "оуэн тим": "открой steam",
+    "а у пэн стоим": "открой steam",
+    "с тима": "steam",
+    "с тим": "steam",
+    "с тем": "steam",
+    "стин": "steam",
+    "дискорт": "discord",
+    "дискорд": "discord",
+    "хром": "chrome",
+    "браузер": "chrome",
+    "калькулятор": "calculator",
+    "блокнот": "notepad",
+}
 
 
 class RouterMode(Enum):
@@ -28,6 +46,7 @@ class CommandRouter:
         app_finder: Optional[AppFinder] = None,
         llm_handler: Optional[Callable[[str], str]] = None,
         mode: RouterMode = RouterMode.STRICT,
+        phonetic_replacements: Optional[Dict[str, str]] = None,
     ) -> None:
         """Initialize CommandRouter.
 
@@ -35,10 +54,12 @@ class CommandRouter:
             app_finder: AppFinder instance. Defaults to new instance or module level handler.
             llm_handler: Optional callback function for LLM/Dialogue processing.
             mode: Operating mode (RouterMode.STRICT or RouterMode.DIALOGUE).
+            phonetic_replacements: Dictionary of phonetic corrections. Defaults to PHONETIC_REPLACEMENTS.
         """
         self.app_finder = app_finder
         self.llm_handler = llm_handler
         self.mode = mode
+        self.phonetic_replacements = phonetic_replacements if phonetic_replacements is not None else PHONETIC_REPLACEMENTS
 
     def set_mode(self, mode: RouterMode) -> None:
         """Change current operation mode.
@@ -47,6 +68,26 @@ class CommandRouter:
             mode: RouterMode.STRICT or RouterMode.DIALOGUE.
         """
         self.mode = mode
+
+    def _normalize_text(self, text: str) -> str:
+        """Apply phonetic normalization and alias replacement on query string.
+
+        Args:
+            text: Lowercase query text.
+
+        Returns:
+            Normalized text with misrecognized terms replaced by canonical forms.
+        """
+        normalized = text.strip().lower()
+
+        # Sort replacements by key length descending so longer phrases match first
+        sorted_replacements = sorted(self.phonetic_replacements.items(), key=lambda item: len(item[0]), reverse=True)
+
+        for misrecognized, canonical in sorted_replacements:
+            pattern = re.compile(re.escape(misrecognized.lower()), re.IGNORECASE)
+            normalized = pattern.sub(canonical, normalized)
+
+        return normalized.strip()
 
     def dispatch(self, query: str) -> str:
         """Route and execute a voice or text query.
@@ -60,7 +101,8 @@ class CommandRouter:
         if not query or not query.strip():
             return "Пустой запрос"
 
-        text = query.strip().lower()
+        # Apply phonetic normalization pre-processing
+        text = self._normalize_text(query)
 
         # 1. App Launching Patterns
         app_match, app_name = self._extract_app_launch_query(text)

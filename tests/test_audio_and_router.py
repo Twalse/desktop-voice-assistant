@@ -44,6 +44,22 @@ class TestCommandRouter(unittest.TestCase):
         self.mock_app_finder = MagicMock()
         self.router = CommandRouter(app_finder=self.mock_app_finder, mode=RouterMode.STRICT)
 
+    def test_phonetic_replacement_and_launch(self):
+        self.mock_app_finder.launch_app.return_value = True
+
+        # Test misrecognitions mapping to "steam"
+        res1 = self.router.dispatch("оуэн тим")
+        self.mock_app_finder.launch_app.assert_called_with("steam")
+        self.assertEqual(res1, "Запускаю Steam")
+
+        res2 = self.router.dispatch("открой с тима")
+        self.mock_app_finder.launch_app.assert_called_with("steam")
+        self.assertEqual(res2, "Запускаю Steam")
+
+        res3 = self.router.dispatch("запусти стин")
+        self.mock_app_finder.launch_app.assert_called_with("steam")
+        self.assertEqual(res3, "Запускаю Steam")
+
     def test_app_launch_russian(self):
         self.mock_app_finder.launch_app.return_value = True
         res = self.router.dispatch("открой discord")
