@@ -7,3 +7,5 @@ faster-whisper
 sounddevice
 numpy
 customtkinter
+google-genai
+requests
