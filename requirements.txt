@@ -3,3 +3,6 @@ pyautogui
 pygetwindow
 pycaw
 comtypes
+faster-whisper
+sounddevice
+numpy
