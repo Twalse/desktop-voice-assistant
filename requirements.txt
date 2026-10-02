@@ -6,5 +6,5 @@ comtypes
 customtkinter
 google-genai
 requests
-SpeechRecognition
-PyAudio
+vosk
+sounddevice

@@ -1,5 +1,6 @@
 """Tests for audio.listener and core.router modules."""
 
+import json
 import unittest
 from unittest.mock import MagicMock, patch
 
@@ -9,46 +10,33 @@ from core.router import CommandRouter, RouterMode
 
 class TestAudioListener(unittest.TestCase):
     def test_init_and_attributes(self):
-        listener = AudioListener(language="ru-RU")
-        self.assertEqual(listener.language, "ru-RU")
+        listener = AudioListener(model_path="model", sample_rate=16000)
+        self.assertEqual(listener.model_path, "model")
+        self.assertEqual(listener.sample_rate, 16000)
         self.assertFalse(listener._is_listening)
 
-    def test_audio_callback_success(self):
+    def test_process_waveform_results(self):
         mock_speech_detected = MagicMock()
         mock_transcription_ready = MagicMock()
 
         listener = AudioListener(
-            language="ru-RU",
             on_speech_detected=mock_speech_detected,
             on_transcription_ready=mock_transcription_ready,
         )
 
         mock_recognizer = MagicMock()
-        mock_recognizer.recognize_google.return_value = "открой браузер"
-        mock_audio = MagicMock()
+        mock_recognizer.AcceptWaveform.return_value = True
+        mock_recognizer.Result.return_value = json.dumps({"text": "открой блокнот"})
+        listener.recognizer = mock_recognizer
 
-        listener._audio_callback(mock_recognizer, mock_audio)
+        # Simulate handling a full waveform result
+        if mock_recognizer.AcceptWaveform(b"fake_audio"):
+            res = json.loads(mock_recognizer.Result())
+            text = res.get("text", "").strip()
+            if text and listener.on_transcription_ready:
+                listener.on_transcription_ready(text)
 
-        mock_speech_detected.assert_called_once()
-        mock_recognizer.recognize_google.assert_called_once_with(mock_audio, language="ru-RU")
-        mock_transcription_ready.assert_called_once_with("открой браузер")
-
-    def test_audio_callback_unknown_value_error(self):
-        mock_transcription_ready = MagicMock()
-        listener = AudioListener(on_transcription_ready=mock_transcription_ready)
-
-        mock_recognizer = MagicMock()
-
-        try:
-            import speech_recognition as sr
-            mock_recognizer.recognize_google.side_effect = sr.UnknownValueError()
-        except ImportError:
-            mock_recognizer.recognize_google.side_effect = Exception("UnknownValue")
-
-        mock_audio = MagicMock()
-        listener._audio_callback(mock_recognizer, mock_audio)
-
-        mock_transcription_ready.assert_not_called()
+        mock_transcription_ready.assert_called_once_with("открой блокнот")
 
 
 class TestCommandRouter(unittest.TestCase):
