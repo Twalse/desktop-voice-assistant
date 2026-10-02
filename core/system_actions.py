@@ -1,12 +1,14 @@
 """System actions module for controlling Windows system parameters, windows, media, and input primitives.
 
 This module provides volume controls, media controls, window management using pygetwindow,
-date/time utilities in Russian, and cursor/keyboard primitives using pyautogui.
+date/time utilities in Russian, power/screenshot actions, and cursor/keyboard primitives using pyautogui.
 """
 
 import datetime
 import locale
+import os
 import sys
+from pathlib import Path
 from typing import Any, List, Optional
 
 # Win32 Virtual Key Codes
@@ -19,14 +21,20 @@ VK_MEDIA_PLAY_PAUSE = 0xCD
 
 
 # --- Helper for Virtual Keys via ctypes ---
-def _send_vk(vk_code: int) -> bool:
-    """Send a virtual key event via ctypes keybd_event on Windows."""
+def _send_vk(vk_code: int, count: int = 1) -> bool:
+    """Send a virtual key event via ctypes keybd_event on Windows.
+
+    Args:
+        vk_code: Virtual key code.
+        count: Number of key presses to send. Defaults to 1.
+    """
     if sys.platform == "win32":
         try:
             import ctypes
             KEYEVENTF_KEYUP = 0x0002
-            ctypes.windll.user32.keybd_event(vk_code, 0, 0, 0)
-            ctypes.windll.user32.keybd_event(vk_code, 0, KEYEVENTF_KEYUP, 0)
+            for _ in range(count):
+                ctypes.windll.user32.keybd_event(vk_code, 0, 0, 0)
+                ctypes.windll.user32.keybd_event(vk_code, 0, KEYEVENTF_KEYUP, 0)
             return True
         except Exception:
             return False
@@ -34,13 +42,13 @@ def _send_vk(vk_code: int) -> bool:
 
 
 # --- Volume Controls ---
-def volume_up(step: float = 0.05) -> bool:
-    """Increase system volume.
+def volume_up(step: float = 0.10) -> bool:
+    """Increase system volume by approximately 10 units (10%).
 
-    Attempts to use pycaw if available, falling back to VK_VOLUME_UP virtual key.
+    Attempts to use pycaw if available, falling back to VK_VOLUME_UP virtual key (5 presses).
 
     Args:
-        step: Volume increase step between 0.0 and 1.0 (for pycaw). Defaults to 0.05.
+        step: Volume increase step between 0.0 and 1.0 (for pycaw). Defaults to 0.10 (10%).
 
     Returns:
         True if volume action succeeded, False otherwise.
@@ -60,17 +68,17 @@ def volume_up(step: float = 0.05) -> bool:
         except Exception:
             pass
 
-    # Fallback to VK_VOLUME_UP
-    return _send_vk(VK_VOLUME_UP)
+    # Fallback to VK_VOLUME_UP (5 presses = 10 units)
+    return _send_vk(VK_VOLUME_UP, count=5)
 
 
-def volume_down(step: float = 0.05) -> bool:
-    """Decrease system volume.
+def volume_down(step: float = 0.10) -> bool:
+    """Decrease system volume by approximately 10 units (10%).
 
-    Attempts to use pycaw if available, falling back to VK_VOLUME_DOWN virtual key.
+    Attempts to use pycaw if available, falling back to VK_VOLUME_DOWN virtual key (5 presses).
 
     Args:
-        step: Volume decrease step between 0.0 and 1.0 (for pycaw). Defaults to 0.05.
+        step: Volume decrease step between 0.0 and 1.0 (for pycaw). Defaults to 0.10 (10%).
 
     Returns:
         True if volume action succeeded, False otherwise.
@@ -90,8 +98,8 @@ def volume_down(step: float = 0.05) -> bool:
         except Exception:
             pass
 
-    # Fallback to VK_VOLUME_DOWN
-    return _send_vk(VK_VOLUME_DOWN)
+    # Fallback to VK_VOLUME_DOWN (5 presses = 10 units)
+    return _send_vk(VK_VOLUME_DOWN, count=5)
 
 
 def mute(status: Optional[bool] = None) -> bool:
@@ -266,6 +274,64 @@ def close_active_window() -> bool:
     try:
         import pyautogui
         pyautogui.hotkey("alt", "f4")
+        return True
+    except Exception:
+        return False
+
+
+# --- Power and System Utilities ---
+def take_screenshot() -> bool:
+    """Take a screenshot and save it to the user's Desktop.
+
+    Returns:
+        True if screenshot was saved successfully, False on error.
+    """
+    try:
+        import pyautogui
+
+        desktop_path = Path(os.path.expanduser("~/Desktop"))
+        timestamp = datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+        file_path = desktop_path / f"screenshot_{timestamp}.png"
+
+        screenshot = pyautogui.screenshot()
+        screenshot.save(str(file_path))
+        return True
+    except Exception:
+        try:
+            import pyautogui
+            pyautogui.press("printscreen")
+            return True
+        except Exception:
+            return False
+
+
+def shutdown_pc() -> bool:
+    """Shutdown the computer.
+
+    Returns:
+        True if shutdown command was issued, False on error.
+    """
+    try:
+        if sys.platform == "win32":
+            os.system("shutdown /s /t 0")
+        else:
+            os.system("shutdown -h now")
+        return True
+    except Exception:
+        return False
+
+
+def restart_pc() -> bool:
+    """Restart the computer.
+
+    Returns:
+        True if restart command was issued, False on error.
+    """
+    try:
+        if sys.platform == "win32":
+            os.system("shutdown /r /t 0")
+        else:
+            os.system("shutdown -r now")
         return True
     except Exception:
         return False

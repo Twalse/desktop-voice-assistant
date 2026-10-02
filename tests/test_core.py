@@ -20,6 +20,10 @@ class TestAppFinder(unittest.TestCase):
         with open(self.lnk_file, "w") as f:
             f.write("mock lnk content")
 
+        self.cs2_file = os.path.join(self.temp_dir.name, "CS2.lnk")
+        with open(self.cs2_file, "w") as f:
+            f.write("mock cs2 content")
+
         self.url_file = os.path.join(self.temp_dir.name, "YouTube.url")
         with open(self.url_file, "w", encoding="utf-8") as f:
             f.write("[InternetShortcut]\nURL=https://youtube.com\n")
@@ -28,7 +32,14 @@ class TestAppFinder(unittest.TestCase):
 
     def test_indexing(self):
         self.assertIn("google chrome", self.finder.apps)
+        self.assertIn("cs2", self.finder.apps)
         self.assertIn("youtube", self.finder.apps)
+
+    def test_exact_match_prioritization(self):
+        with patch.object(self.finder, "_execute", return_value=True) as mock_exec:
+            res = self.finder.launch_app("cs2")
+            self.assertTrue(res)
+            mock_exec.assert_called_once()
 
     def test_parse_url_shortcut(self):
         url_target = self.finder._parse_shortcut(os.path.join(self.temp_dir.name, "YouTube.url"))
@@ -60,7 +71,11 @@ class TestSystemActions(unittest.TestCase):
         mock_send_vk.return_value = True
 
         self.assertTrue(system_actions.volume_up())
+        mock_send_vk.assert_called_with(system_actions.VK_VOLUME_UP, count=5)
+
         self.assertTrue(system_actions.volume_down())
+        mock_send_vk.assert_called_with(system_actions.VK_VOLUME_DOWN, count=5)
+
         self.assertTrue(system_actions.mute())
 
     @patch("core.system_actions._send_vk")
@@ -77,6 +92,12 @@ class TestSystemActions(unittest.TestCase):
 
         date_str = system_actions.get_current_date()
         self.assertIn(" г., ", date_str)
+
+    @patch("os.system")
+    def test_power_commands(self, mock_system):
+        mock_system.return_value = 0
+        self.assertTrue(system_actions.shutdown_pc())
+        self.assertTrue(system_actions.restart_pc())
 
     def test_move_cursor(self):
         mock_pyautogui = MagicMock()

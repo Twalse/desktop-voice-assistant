@@ -13,9 +13,8 @@ from rapidfuzz import fuzz
 from core import system_actions
 from core.app_finder import AppFinder, launch_app
 
-# --- Phonetic Replacement & Alias Dictionary ---
+# --- Phonetic Replacement & Alias Dictionaries ---
 # Add common Speech-to-Text misrecognitions here.
-# Longer phrases should come before shorter substrings for accurate replacement.
 PHONETIC_REPLACEMENTS: Dict[str, str] = {
     "оуэн тим": "открой steam",
     "а у пэн стоим": "открой steam",
@@ -24,11 +23,45 @@ PHONETIC_REPLACEMENTS: Dict[str, str] = {
     "с тем": "steam",
     "стин": "steam",
     "дискорт": "discord",
-    "дискорд": "discord",
     "хром": "chrome",
     "браузер": "chrome",
     "калькулятор": "calculator",
     "блокнот": "notepad",
+    "фл студио": "FL Studio",
+    "кап кут": "CapCut",
+    "капкут": "CapCut",
+    "кс 2": "CS2",
+    "кс2": "CS2",
+    "кэс": "CS2",
+    "раст": "Rust",
+    "осу": "osu!",
+    "осо": "osu!",
+    "блокбенч": "Blockbench",
+    "вижл студио": "Visual Studio Code",
+    "вс код": "Visual Studio Code",
+    "фотошоп": "Adobe Photoshop",
+    "стим": "Steam",
+}
+
+# Explicit App Aliases mapping extracted spoken app terms to exact binary/shortcut names
+APP_ALIASES: Dict[str, str] = {
+    "фл студио": "FL Studio",
+    "кап кут": "CapCut",
+    "капкут": "CapCut",
+    "кс 2": "CS2",
+    "кс2": "CS2",
+    "кэс": "CS2",
+    "раст": "Rust",
+    "осу": "osu!",
+    "осо": "osu!",
+    "блокбенч": "Blockbench",
+    "вижл студио": "Visual Studio Code",
+    "вс код": "Visual Studio Code",
+    "фотошоп": "Adobe Photoshop",
+    "дискорд": "Discord",
+    "стим": "Steam",
+    "steam": "Steam",
+    "браузер": "Chrome",
 }
 
 
@@ -47,6 +80,7 @@ class CommandRouter:
         llm_handler: Optional[Callable[[str], str]] = None,
         mode: RouterMode = RouterMode.STRICT,
         phonetic_replacements: Optional[Dict[str, str]] = None,
+        app_aliases: Optional[Dict[str, str]] = None,
     ) -> None:
         """Initialize CommandRouter.
 
@@ -55,11 +89,13 @@ class CommandRouter:
             llm_handler: Optional callback function for LLM/Dialogue processing.
             mode: Operating mode (RouterMode.STRICT or RouterMode.DIALOGUE).
             phonetic_replacements: Dictionary of phonetic corrections. Defaults to PHONETIC_REPLACEMENTS.
+            app_aliases: Dictionary mapping spoken app names to canonical app names. Defaults to APP_ALIASES.
         """
         self.app_finder = app_finder
         self.llm_handler = llm_handler
         self.mode = mode
         self.phonetic_replacements = phonetic_replacements if phonetic_replacements is not None else PHONETIC_REPLACEMENTS
+        self.app_aliases = app_aliases if app_aliases is not None else APP_ALIASES
 
     def set_mode(self, mode: RouterMode) -> None:
         """Change current operation mode.
@@ -105,8 +141,11 @@ class CommandRouter:
         text = self._normalize_text(query)
 
         # 1. App Launching Patterns
-        app_match, app_name = self._extract_app_launch_query(text)
+        app_match, extracted_name = self._extract_app_launch_query(text)
         if app_match:
+            # Check explicit app aliases
+            app_name = self.app_aliases.get(extracted_name.lower(), extracted_name)
+
             launched = False
             if self.app_finder:
                 launched = self.app_finder.launch_app(app_name)
@@ -114,12 +153,24 @@ class CommandRouter:
                 launched = launch_app(app_name)
 
             if launched:
-                # Return clean capitalized name or original extracted name
                 return f"Запускаю {app_name.capitalize()}"
             else:
                 return f"Приложение '{app_name}' не найдено"
 
-        # 2. Time/Date Info Queries
+        # 2. System Commands (Power, Screenshots)
+        if self._is_match(text, ["выключи компьютер", "выключи пк", "завершение работы", "выключить пк", "shutdown"]):
+            system_actions.shutdown_pc()
+            return "Завершение работы ПК"
+
+        if self._is_match(text, ["перезагрузи", "рестарт", "перезагрузи компьютер", "restart"]):
+            system_actions.restart_pc()
+            return "Перезагрузка ПК"
+
+        if self._is_match(text, ["сделай скриншот", "сделай снимок экрана", "скриншот", "screenshot"]):
+            system_actions.take_screenshot()
+            return "Скриншот сохранен"
+
+        # 3. Time/Date Info Queries
         if self._is_match(text, ["сколько времени", "который час", "какое время", "what time is it", "what's the time"]):
             current_time = system_actions.get_current_time()
             return f"Сейчас {current_time}"
@@ -128,7 +179,7 @@ class CommandRouter:
             current_date = system_actions.get_current_date()
             return f"Сегодня {current_date}"
 
-        # 3. Media Controls
+        # 4. Media Controls
         if self._is_match(text, ["пауза", "плей", "останови видео", "воспроизведение", "pause", "resume", "play"]):
             system_actions.media_play_pause()
             return "Воспроизведение/Пауза"
@@ -141,7 +192,7 @@ class CommandRouter:
             system_actions.media_prev()
             return "Предыдущий трек"
 
-        # 4. Volume Controls
+        # 5. Volume Controls
         if self._is_match(text, ["громче", "сделай громче", "увеличь звук", "volume up", "louder"]):
             system_actions.volume_up()
             return "Громкость увеличена"
@@ -154,7 +205,7 @@ class CommandRouter:
             system_actions.mute()
             return "Звук переключен"
 
-        # 5. Window Management
+        # 6. Window Management
         if self._is_match(text, ["сверни", "свернуть окно", "сверни окно", "minimize"]):
             system_actions.minimize_active_window()
             return "Окно свернуто"
@@ -173,7 +224,7 @@ class CommandRouter:
                 return f"Открытые окна: {', '.join(windows)}"
             return "Нет открытых окон"
 
-        # 6. Mode 2: Dialogue / LLM fallback
+        # 7. Mode 2: Dialogue / LLM fallback
         if self.mode == RouterMode.DIALOGUE:
             if self.llm_handler:
                 try:

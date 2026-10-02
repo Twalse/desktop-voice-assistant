@@ -47,23 +47,50 @@ class TestCommandRouter(unittest.TestCase):
     def test_phonetic_replacement_and_launch(self):
         self.mock_app_finder.launch_app.return_value = True
 
-        # Test misrecognitions mapping to "steam"
+        # Test misrecognitions mapping to "Steam" via APP_ALIASES
         res1 = self.router.dispatch("оуэн тим")
-        self.mock_app_finder.launch_app.assert_called_with("steam")
+        self.mock_app_finder.launch_app.assert_called_with("Steam")
         self.assertEqual(res1, "Запускаю Steam")
 
         res2 = self.router.dispatch("открой с тима")
-        self.mock_app_finder.launch_app.assert_called_with("steam")
+        self.mock_app_finder.launch_app.assert_called_with("Steam")
         self.assertEqual(res2, "Запускаю Steam")
 
         res3 = self.router.dispatch("запусти стин")
-        self.mock_app_finder.launch_app.assert_called_with("steam")
+        self.mock_app_finder.launch_app.assert_called_with("Steam")
         self.assertEqual(res3, "Запускаю Steam")
+
+    def test_new_app_aliases(self):
+        self.mock_app_finder.launch_app.return_value = True
+
+        res = self.router.dispatch("открой кс 2")
+        self.mock_app_finder.launch_app.assert_called_with("CS2")
+        self.assertEqual(res, "Запускаю Cs2")
+
+        res2 = self.router.dispatch("запусти капкут")
+        self.mock_app_finder.launch_app.assert_called_with("CapCut")
+        self.assertEqual(res2, "Запускаю Capcut")
+
+    @patch("core.system_actions.shutdown_pc")
+    @patch("core.system_actions.restart_pc")
+    @patch("core.system_actions.take_screenshot")
+    def test_new_system_commands(self, mock_shot, mock_restart, mock_shutdown):
+        res1 = self.router.dispatch("выключи компьютер")
+        mock_shutdown.assert_called_once()
+        self.assertEqual(res1, "Завершение работы ПК")
+
+        res2 = self.router.dispatch("перезагрузи")
+        mock_restart.assert_called_once()
+        self.assertEqual(res2, "Перезагрузка ПК")
+
+        res3 = self.router.dispatch("сделай скриншот")
+        mock_shot.assert_called_once()
+        self.assertEqual(res3, "Скриншот сохранен")
 
     def test_app_launch_russian(self):
         self.mock_app_finder.launch_app.return_value = True
-        res = self.router.dispatch("открой discord")
-        self.mock_app_finder.launch_app.assert_called_with("discord")
+        res = self.router.dispatch("открой дискорд")
+        self.mock_app_finder.launch_app.assert_called_with("Discord")
         self.assertEqual(res, "Запускаю Discord")
 
     def test_app_launch_english(self):

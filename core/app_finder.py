@@ -101,6 +101,8 @@ class AppFinder:
     def launch_app(self, query: str, threshold: float = 70.0) -> bool:
         """Find the closest matching app for query and launch it if similarity >= threshold.
 
+        Prioritizes exact case-insensitive matches before falling back to rapidfuzz.
+
         Args:
             query: The application name query to search for.
             threshold: Minimum rapidfuzz similarity score (0-100). Defaults to 70.0.
@@ -112,8 +114,15 @@ class AppFinder:
             return False
 
         clean_query = query.strip().lower()
+
+        # Step 1: Prioritize exact string matches
+        if clean_query in self.apps:
+            shortcut_path, target_path = self.apps[clean_query]
+            return self._execute(shortcut_path, target_path)
+
         choices = list(self.apps.keys())
 
+        # Step 2: Fallback to rapidfuzz WRatio score
         try:
             match = process.extractOne(clean_query, choices, scorer=fuzz.WRatio)
             if not match:
