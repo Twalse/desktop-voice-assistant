@@ -26,7 +26,7 @@ class TestAudioListener(unittest.TestCase):
 
         mock_recognizer = MagicMock()
         mock_recognizer.AcceptWaveform.return_value = True
-        mock_recognizer.Result.return_value = json.dumps({"text": "открой блокнот"})
+        mock_recognizer.Result.return_value = json.dumps({"text": "ассистент открой блокнот"})
         listener.recognizer = mock_recognizer
 
         # Simulate handling a full waveform result
@@ -36,38 +36,56 @@ class TestAudioListener(unittest.TestCase):
             if text and listener.on_transcription_ready:
                 listener.on_transcription_ready(text)
 
-        mock_transcription_ready.assert_called_once_with("открой блокнот")
+        mock_transcription_ready.assert_called_once_with("ассистент открой блокнот")
 
 
 class TestCommandRouter(unittest.TestCase):
     def setUp(self):
         self.mock_app_finder = MagicMock()
-        self.router = CommandRouter(app_finder=self.mock_app_finder, mode=RouterMode.STRICT)
+        self.router = CommandRouter(app_finder=self.mock_app_finder, mode=RouterMode.STRICT, require_wake_word=True)
+
+    def test_wake_word_filtering(self):
+        # Query without wake word -> ignored
+        res = self.router.dispatch("открой браузер")
+        self.assertEqual(res, "Игнорировано (нет ключевого слова)")
+        self.mock_app_finder.launch_app.assert_not_called()
+
+    def test_parametric_volume_command(self):
+        with patch("core.system_actions.set_volume") as mock_set_vol:
+            res = self.router.dispatch("ассистент поставь громкость 50 процентов")
+            mock_set_vol.assert_called_once_with(50)
+            self.assertEqual(res, "Громкость установлена на 50%")
+
+    def test_web_search_command(self):
+        with patch("core.system_actions.search_web") as mock_search:
+            res = self.router.dispatch("ассистент найди в интернете рецепт пиццы")
+            mock_search.assert_called_once_with("рецепт пиццы")
+            self.assertEqual(res, "Ищу в интернете: 'рецепт пиццы'")
 
     def test_phonetic_replacement_and_launch(self):
         self.mock_app_finder.launch_app.return_value = True
 
         # Test misrecognitions mapping to "Steam" via APP_ALIASES
-        res1 = self.router.dispatch("оуэн тим")
+        res1 = self.router.dispatch("ассистент оуэн тим")
         self.mock_app_finder.launch_app.assert_called_with("Steam")
         self.assertEqual(res1, "Запускаю Steam")
 
-        res2 = self.router.dispatch("открой с тима")
+        res2 = self.router.dispatch("ассистент открой с тима")
         self.mock_app_finder.launch_app.assert_called_with("Steam")
         self.assertEqual(res2, "Запускаю Steam")
 
-        res3 = self.router.dispatch("запусти стин")
+        res3 = self.router.dispatch("ассистент запусти стин")
         self.mock_app_finder.launch_app.assert_called_with("Steam")
         self.assertEqual(res3, "Запускаю Steam")
 
     def test_new_app_aliases(self):
         self.mock_app_finder.launch_app.return_value = True
 
-        res = self.router.dispatch("открой кс 2")
+        res = self.router.dispatch("ассистент открой кс 2")
         self.mock_app_finder.launch_app.assert_called_with("CS2")
         self.assertEqual(res, "Запускаю Cs2")
 
-        res2 = self.router.dispatch("запусти капкут")
+        res2 = self.router.dispatch("ассистент запусти капкут")
         self.mock_app_finder.launch_app.assert_called_with("CapCut")
         self.assertEqual(res2, "Запускаю Capcut")
 
@@ -75,75 +93,75 @@ class TestCommandRouter(unittest.TestCase):
     @patch("core.system_actions.restart_pc")
     @patch("core.system_actions.take_screenshot")
     def test_new_system_commands(self, mock_shot, mock_restart, mock_shutdown):
-        res1 = self.router.dispatch("выключи компьютер")
+        res1 = self.router.dispatch("ассистент выключи компьютер")
         mock_shutdown.assert_called_once()
         self.assertEqual(res1, "Завершение работы ПК")
 
-        res2 = self.router.dispatch("перезагрузи")
+        res2 = self.router.dispatch("ассистент перезагрузи")
         mock_restart.assert_called_once()
         self.assertEqual(res2, "Перезагрузка ПК")
 
-        res3 = self.router.dispatch("сделай скриншот")
+        res3 = self.router.dispatch("ассистент сделай скриншот")
         mock_shot.assert_called_once()
         self.assertEqual(res3, "Скриншот сохранен")
 
     def test_app_launch_russian(self):
         self.mock_app_finder.launch_app.return_value = True
-        res = self.router.dispatch("открой дискорд")
+        res = self.router.dispatch("ассистент открой дискорд")
         self.mock_app_finder.launch_app.assert_called_with("Discord")
         self.assertEqual(res, "Запускаю Discord")
 
     def test_app_launch_english(self):
         self.mock_app_finder.launch_app.return_value = True
-        res = self.router.dispatch("launch chrome")
+        res = self.router.dispatch("assistant launch chrome")
         self.mock_app_finder.launch_app.assert_called_with("chrome")
         self.assertEqual(res, "Запускаю Chrome")
 
     def test_app_launch_not_found(self):
         self.mock_app_finder.launch_app.return_value = False
-        res = self.router.dispatch("запусти fakeapp")
+        res = self.router.dispatch("ассистент запусти fakeapp")
         self.assertEqual(res, "Приложение 'fakeapp' не найдено")
 
     @patch("core.system_actions.get_current_time", return_value="15:45")
     def test_time_query(self, mock_time):
-        res = self.router.dispatch("сколько времени")
+        res = self.router.dispatch("ассистент сколько времени")
         self.assertEqual(res, "Сейчас 15:45")
 
-        res_en = self.router.dispatch("what time is it")
+        res_en = self.router.dispatch("assistant what time is it")
         self.assertEqual(res_en, "Сейчас 15:45")
 
     @patch("core.system_actions.media_play_pause")
     def test_media_controls(self, mock_play_pause):
-        res = self.router.dispatch("пауза")
+        res = self.router.dispatch("ассистент пауза")
         mock_play_pause.assert_called_once()
         self.assertEqual(res, "Воспроизведение/Пауза")
 
     @patch("core.system_actions.volume_up")
     def test_volume_controls(self, mock_vol_up):
-        res = self.router.dispatch("громче")
+        res = self.router.dispatch("ассистент громче")
         mock_vol_up.assert_called_once()
         self.assertEqual(res, "Громкость увеличена")
 
     @patch("core.system_actions.minimize_active_window")
     def test_window_management(self, mock_min):
-        res = self.router.dispatch("сверни")
+        res = self.router.dispatch("ассистент сверни")
         mock_min.assert_called_once()
         self.assertEqual(res, "Окно свернуто")
 
     @patch("core.system_actions.get_open_windows", return_value=["Chrome", "Telegram"])
     def test_list_windows(self, mock_get_windows):
-        res = self.router.dispatch("список окон")
+        res = self.router.dispatch("ассистент список окон")
         self.assertEqual(res, "Открытые окна: Chrome, Telegram")
 
     def test_strict_mode_unrecognized(self):
-        res = self.router.dispatch("расскажи анекдот")
+        res = self.router.dispatch("ассистент расскажи анекдот")
         self.assertEqual(res, "Команда не распознана")
 
     def test_dialogue_mode_llm_forwarding(self):
         mock_llm = MagicMock(return_value="Вот отличный анекдот!")
-        router = CommandRouter(llm_handler=mock_llm, mode=RouterMode.DIALOGUE)
+        router = CommandRouter(llm_handler=mock_llm, mode=RouterMode.DIALOGUE, require_wake_word=True)
 
-        res = router.dispatch("расскажи анекдот")
+        res = router.dispatch("ассистент расскажи анекдот")
         mock_llm.assert_called_once_with("расскажи анекдот")
         self.assertEqual(res, "Вот отличный анекдот!")
 

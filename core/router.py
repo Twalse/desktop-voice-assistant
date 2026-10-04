@@ -1,42 +1,50 @@
 """Command Router module for multi-language voice command dispatching.
 
-Supports Russian and English phrases, phonetic normalization, pattern extraction, fuzzy matching,
-and two operation modes: Strict/Scripted mode and Dialogue/LLM mode.
+Supports Russian and English phrases, wake word activation, phonetic normalization,
+pattern extraction, parametric commands, fuzzy matching, and two operation modes:
+Strict/Scripted mode and Dialogue/LLM mode.
 """
 
 import re
 from enum import Enum
-from typing import Callable, Dict, Optional, Tuple
+from typing import Callable, Dict, List, Optional, Tuple
 
 from rapidfuzz import fuzz
 
 from core import system_actions
 from core.app_finder import AppFinder, launch_app
 
+# --- Wake Word Variations ---
+DEFAULT_WAKE_WORDS: List[str] = [
+    "ассистент",
+    "асистент",
+    "assistant",
+    "джарвис",
+]
+
 # --- Phonetic Replacement & Alias Dictionaries ---
-# Add common Speech-to-Text misrecognitions here.
 PHONETIC_REPLACEMENTS: Dict[str, str] = {
-    "оуэн тим": "открой steam",
-    "а у пэн стоим": "открой steam",
+    "стин": "steam",
     "с тима": "steam",
     "с тим": "steam",
     "с тем": "steam",
-    "стин": "steam",
-    "дискорт": "discord",
-    "хром": "chrome",
-    "браузер": "chrome",
-    "калькулятор": "calculator",
-    "блокнот": "notepad",
     "фл студио": "FL Studio",
-    "кап кут": "CapCut",
-    "капкут": "CapCut",
     "кс 2": "CS2",
     "кс2": "CS2",
     "кэс": "CS2",
     "раст": "Rust",
     "осу": "osu!",
     "осо": "osu!",
+    "кап кут": "CapCut",
+    "капкут": "CapCut",
     "блокбенч": "Blockbench",
+    "оуэн тим": "открой steam",
+    "а у пэн стоим": "открой steam",
+    "дискорт": "discord",
+    "хром": "chrome",
+    "браузер": "chrome",
+    "калькулятор": "calculator",
+    "блокнот": "notepad",
     "вижл студио": "Visual Studio Code",
     "вс код": "Visual Studio Code",
     "фотошоп": "Adobe Photoshop",
@@ -79,6 +87,8 @@ class CommandRouter:
         app_finder: Optional[AppFinder] = None,
         llm_handler: Optional[Callable[[str], str]] = None,
         mode: RouterMode = RouterMode.STRICT,
+        wake_words: Optional[List[str]] = None,
+        require_wake_word: bool = True,
         phonetic_replacements: Optional[Dict[str, str]] = None,
         app_aliases: Optional[Dict[str, str]] = None,
     ) -> None:
@@ -88,12 +98,16 @@ class CommandRouter:
             app_finder: AppFinder instance. Defaults to new instance or module level handler.
             llm_handler: Optional callback function for LLM/Dialogue processing.
             mode: Operating mode (RouterMode.STRICT or RouterMode.DIALOGUE).
+            wake_words: List of wake word activation triggers. Defaults to DEFAULT_WAKE_WORDS.
+            require_wake_word: If True, ignores input unless it starts with a wake word.
             phonetic_replacements: Dictionary of phonetic corrections. Defaults to PHONETIC_REPLACEMENTS.
             app_aliases: Dictionary mapping spoken app names to canonical app names. Defaults to APP_ALIASES.
         """
         self.app_finder = app_finder
         self.llm_handler = llm_handler
         self.mode = mode
+        self.wake_words = wake_words if wake_words is not None else DEFAULT_WAKE_WORDS
+        self.require_wake_word = require_wake_word
         self.phonetic_replacements = phonetic_replacements if phonetic_replacements is not None else PHONETIC_REPLACEMENTS
         self.app_aliases = app_aliases if app_aliases is not None else APP_ALIASES
 
@@ -104,6 +118,28 @@ class CommandRouter:
             mode: RouterMode.STRICT or RouterMode.DIALOGUE.
         """
         self.mode = mode
+
+    def _strip_wake_word(self, text: str) -> Tuple[bool, str]:
+        """Check for wake word at beginning of phrase and strip it.
+
+        Args:
+            text: Lowercase input string.
+
+        Returns:
+            Tuple of (wake_word_found, stripped_text).
+        """
+        if not self.require_wake_word:
+            return True, text
+
+        normalized_input = text.strip().lower()
+
+        for wake_word in self.wake_words:
+            pattern = re.compile(r"^" + re.escape(wake_word.lower()) + r"[\s,.:!]*", re.IGNORECASE)
+            if pattern.search(normalized_input):
+                stripped = pattern.sub("", normalized_input).strip()
+                return True, stripped
+
+        return False, text
 
     def _normalize_text(self, text: str) -> str:
         """Apply phonetic normalization and alias replacement on query string.
@@ -137,10 +173,37 @@ class CommandRouter:
         if not query or not query.strip():
             return "Пустой запрос"
 
-        # Apply phonetic normalization pre-processing
-        text = self._normalize_text(query)
+        raw_text = query.strip().lower()
 
-        # 1. App Launching Patterns
+        # Check and strip wake word
+        wake_found, stripped_text = self._strip_wake_word(raw_text)
+        if not wake_found:
+            return "Игнорировано (нет ключевого слова)"
+
+        # Apply phonetic normalization pre-processing on stripped text
+        text = self._normalize_text(stripped_text)
+        if not text:
+            return "Слушаю..."
+
+        # 1. Parametric Volume Commands
+        vol_match = re.search(r"(?:поставь|установи|сделай)?\s*громкость\s*(?:на)?\s*(\d{1,3})\s*(?:процентов|процента|%)?", text)
+        if vol_match:
+            try:
+                target_level = int(vol_match.group(1))
+                system_actions.set_volume(target_level)
+                return f"Громкость установлена на {target_level}%"
+            except Exception:
+                pass
+
+        # 2. Web Search Commands
+        search_match = re.search(r"^(?:найди в интернете|загугли|поищи|найди|search)\s+(.+)", text)
+        if search_match:
+            search_query = search_match.group(1).strip()
+            if search_query:
+                system_actions.search_web(search_query)
+                return f"Ищу в интернете: '{search_query}'"
+
+        # 3. App Launching Patterns
         app_match, extracted_name = self._extract_app_launch_query(text)
         if app_match:
             # Check explicit app aliases
@@ -157,7 +220,7 @@ class CommandRouter:
             else:
                 return f"Приложение '{app_name}' не найдено"
 
-        # 2. System Commands (Power, Screenshots)
+        # 4. System Commands (Power, Screenshots)
         if self._is_match(text, ["выключи компьютер", "выключи пк", "завершение работы", "выключить пк", "shutdown"]):
             system_actions.shutdown_pc()
             return "Завершение работы ПК"
@@ -170,7 +233,7 @@ class CommandRouter:
             system_actions.take_screenshot()
             return "Скриншот сохранен"
 
-        # 3. Time/Date Info Queries
+        # 5. Time/Date Info Queries
         if self._is_match(text, ["сколько времени", "который час", "какое время", "what time is it", "what's the time"]):
             current_time = system_actions.get_current_time()
             return f"Сейчас {current_time}"
@@ -179,7 +242,7 @@ class CommandRouter:
             current_date = system_actions.get_current_date()
             return f"Сегодня {current_date}"
 
-        # 4. Media Controls
+        # 6. Media Controls
         if self._is_match(text, ["пауза", "плей", "останови видео", "воспроизведение", "pause", "resume", "play"]):
             system_actions.media_play_pause()
             return "Воспроизведение/Пауза"
@@ -192,7 +255,7 @@ class CommandRouter:
             system_actions.media_prev()
             return "Предыдущий трек"
 
-        # 5. Volume Controls
+        # 7. Step Volume Controls
         if self._is_match(text, ["громче", "сделай громче", "увеличь звук", "volume up", "louder"]):
             system_actions.volume_up()
             return "Громкость увеличена"
@@ -205,7 +268,7 @@ class CommandRouter:
             system_actions.mute()
             return "Звук переключен"
 
-        # 6. Window Management
+        # 8. Window Management
         if self._is_match(text, ["сверни", "свернуть окно", "сверни окно", "minimize"]):
             system_actions.minimize_active_window()
             return "Окно свернуто"
@@ -224,11 +287,11 @@ class CommandRouter:
                 return f"Открытые окна: {', '.join(windows)}"
             return "Нет открытых окон"
 
-        # 7. Mode 2: Dialogue / LLM fallback
+        # 9. Mode 2: Dialogue / LLM fallback
         if self.mode == RouterMode.DIALOGUE:
             if self.llm_handler:
                 try:
-                    response = self.llm_handler(query)
+                    response = self.llm_handler(stripped_text)
                     return response if response else "Ответ не получен"
                 except Exception as e:
                     return f"Ошибка обращения к LLM: {e}"

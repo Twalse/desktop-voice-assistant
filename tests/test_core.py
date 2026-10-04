@@ -78,6 +78,15 @@ class TestSystemActions(unittest.TestCase):
 
         self.assertTrue(system_actions.mute())
 
+    def test_set_volume(self):
+        self.assertFalse(system_actions.set_volume(50))  # Non-win32 fallback returns False cleanly
+
+    @patch("webbrowser.open")
+    def test_search_web(self, mock_web_open):
+        mock_web_open.return_value = True
+        self.assertTrue(system_actions.search_web("погода москва"))
+        mock_web_open.assert_called_once_with("https://www.google.com/search?q=%D0%BF%D0%BE%D0%B3%D0%BE%D0%B4%D0%B0+%D0%BC%D0%BE%D1%81%D0%BA%D0%B2%D0%B0")
+
     @patch("core.system_actions._send_vk")
     def test_media_controls(self, mock_send_vk):
         mock_send_vk.return_value = True

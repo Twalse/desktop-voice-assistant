@@ -1,13 +1,15 @@
 """System actions module for controlling Windows system parameters, windows, media, and input primitives.
 
 This module provides volume controls, media controls, window management using pygetwindow,
-date/time utilities in Russian, power/screenshot actions, and cursor/keyboard primitives using pyautogui.
+date/time utilities in Russian, power/screenshot actions, web search, and cursor/keyboard primitives using pyautogui.
 """
 
 import datetime
 import locale
 import os
 import sys
+import urllib.parse
+import webbrowser
 from pathlib import Path
 from typing import Any, List, Optional
 
@@ -42,6 +44,34 @@ def _send_vk(vk_code: int, count: int = 1) -> bool:
 
 
 # --- Volume Controls ---
+def set_volume(level: int) -> bool:
+    """Set absolute system volume percentage (0 to 100).
+
+    Args:
+        level: Target volume percentage between 0 and 100.
+
+    Returns:
+        True if volume was set successfully, False otherwise.
+    """
+    clamped_level = max(0, min(100, level))
+    scalar_vol = clamped_level / 100.0
+
+    if sys.platform == "win32":
+        try:
+            from comtypes import CLSCTX_ALL  # type: ignore
+            from pycaw.pycaw import AudioUtilities, IAudioEndpointVolume  # type: ignore
+
+            devices = AudioUtilities.GetSpeakers()
+            interface = devices.Activate(IAudioEndpointVolume._iid_, CLSCTX_ALL, None)
+            volume = interface.QueryInterface(IAudioEndpointVolume)
+            volume.SetMasterVolumeLevelScalar(scalar_vol, None)
+            return True
+        except Exception:
+            pass
+
+    return False
+
+
 def volume_up(step: float = 0.10) -> bool:
     """Increase system volume by approximately 10 units (10%).
 
@@ -280,6 +310,27 @@ def close_active_window() -> bool:
 
 
 # --- Power and System Utilities ---
+def search_web(query: str) -> bool:
+    """Perform a Google search in the default web browser.
+
+    Args:
+        query: Search query string.
+
+    Returns:
+        True if browser search opened successfully, False on error.
+    """
+    if not query or not query.strip():
+        return False
+
+    try:
+        encoded_query = urllib.parse.quote_plus(query.strip())
+        search_url = f"https://www.google.com/search?q={encoded_query}"
+        webbrowser.open(search_url)
+        return True
+    except Exception:
+        return False
+
+
 def take_screenshot() -> bool:
     """Take a screenshot and save it to the user's Desktop.
 
